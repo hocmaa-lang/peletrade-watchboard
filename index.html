@@ -294,16 +294,6 @@ th.stockcol, td.stockcol { width: 104px; min-width: 104px; white-space: nowrap; 
 }
 #lens-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ---- compliance history --------------------------------------------------- */
-.cstrip { display: flex; align-items: center; gap: 9px; margin-top: 11px; flex-wrap: wrap; }
-.cs-lab, .cs-ends { font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); }
-.cs-ends { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 11px; }
-.cs-cells { display: inline-flex; gap: 3px; }
-.cs-cell { width: 15px; height: 15px; border-radius: 2px; background: var(--flat-bg); display: inline-block; }
-.cs-cell.ok { background: var(--good-ink); }
-.cs-cell.bad { background: var(--crit-ink); }
-.cs-cell.na { background: var(--flat-bg); border: 1px solid var(--hairline); }
-.cs-cell.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
 .tb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
 .tchip {
   appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
@@ -321,25 +311,6 @@ th.stockcol, td.stockcol { width: 104px; min-width: 104px; white-space: nowrap; 
 .tchip .miss { opacity: .8; font-weight: 400; }
 .tb-foot { margin-top: 10px; font-size: 11px; color: var(--ink-3); line-height: 1.5; max-width: 100ch; }
 .tb-foot .assumed-key { border-bottom: 1px dashed var(--ink-3); }
-
-/* ---- target lines inside the notes ---------------------------------------- */
-.tgt { margin-top: 12px; border-top: 1px solid var(--hairline-2); padding-top: 11px; }
-.tgt .tgt-lab { font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
-.tgt-row {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  margin-top: 7px; font-size: 12.5px;
-}
-.tgt-row .verdict {
-  font: 600 10px/1.6 Archivo, sans-serif; letter-spacing: .07em; text-transform: uppercase;
-  padding: 1px 7px; border-radius: 999px; flex: none;
-}
-.tgt-row .verdict.on { background: var(--good-bg); color: var(--good-ink); }
-.tgt-row .verdict.off { background: var(--crit-bg); color: var(--crit-ink); }
-.tgt-row .what { color: var(--ink); }
-.tgt-row .nums { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
-.tgt-row .nums b { color: var(--ink); }
-.tgt-row .assumed { font-size: 10.5px; color: var(--ink-3); font-style: italic; }
-.tgt .norank { font-size: 12.5px; color: var(--ink-2); margin-top: 7px; }
 
 /* ---- campaign notes -------------------------------------------------------
    Deliberately NOT a dialog. These notes are the standing instruction for the
@@ -548,9 +519,10 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
 
   <section class="board">
     <div class="board-head">
-      <div>
-        <h2>Watchboard — where each ASIN is heading</h2>
-        <div class="note" id="board-note">Direction compares the last 7 complete days against the 7 before them, always on units, so it means the same thing whichever measure is selected. Today is excluded from every trend because it is still filling.</div>
+      <div class="seg seg-sm" role="group" aria-label="FBA stock filter" id="stock-seg">
+        <button type="button" data-stock="all" aria-pressed="true">All</button>
+        <button type="button" data-stock="crit" aria-pressed="false">Low FBA</button>
+        <button type="button" data-stock="low" aria-pressed="false">Low + watch</button>
       </div>
       <div class="eyebrow" id="board-measure">Revenue</div>
     </div>
@@ -648,6 +620,7 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
   let measure = 'sales';
   let scope = null;                             // asin or null
   let sortKey = 'share', sortDir = -1;
+  let stockFilter = 'all';                      // all | crit | low
 
   function range(a, b) { const o = []; for (let i = Math.max(0, a); i < b; i++) o.push(i); return o; }
   function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
@@ -1072,6 +1045,17 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     if (s.reorder === 'SOON' || (s.days !== null && s.days <= 35)) return 'warn';
     return 'ok';
   }
+  /* The filter and the colour must never disagree: both read coverClass, so
+     "Low FBA" is exactly the set the column paints red, and "Low + watch" adds
+     the amber band. An ASIN with no inventory row has no cover to judge and so
+     appears only under All — it is not silently counted as healthy or as red. */
+  const STOCK_FILTER = {
+    all: () => true,
+    crit: p => coverClass(p.stock) === 'crit',
+    low: p => { const c = coverClass(p.stock); return c === 'crit' || c === 'warn'; },
+  };
+  const STOCK_LABEL = { all: 'All', crit: 'Low FBA', low: 'Low + watch' };
+
   function stockCell(p) {
     const s = p.stock;
     if (!s) return '<span class="stock none">—</span>';
@@ -1107,7 +1091,23 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     }[sortKey];
     stats.sort((a, b) => cmp(a, b) * sortDir);
 
-    document.getElementById('board-body').innerHTML = stats.map(s => {
+    // Counts are of the whole set, not of what is on screen, so the buttons say
+    // how many are red whichever one is selected.
+    document.querySelectorAll('#stock-seg button[data-stock]').forEach(b => {
+      const k = b.dataset.stock;
+      b.textContent = STOCK_LABEL[k] + ' ' + P.filter(STOCK_FILTER[k]).length;
+      b.setAttribute('aria-pressed', String(k === stockFilter));
+    });
+    const shown = stats.filter(s => STOCK_FILTER[stockFilter](s.p));
+    if (!shown.length) {
+      // An empty table with no explanation reads as a broken page. Say which
+      // filter emptied it and what that actually means.
+      document.getElementById('board-body').innerHTML =
+        '<tr><td colspan="9" class="l" style="padding:16px;color:var(--ink-3);font-size:12.5px">' +
+        'No ASIN is ' + (stockFilter === 'crit' ? 'flagged for reorder or down to 21 days of cover'
+                                               : 'at 35 days of cover or less') +
+        ' — nothing is running out on this reading. Switch back to <strong>All</strong> to see every ASIN.</td></tr>';
+    } else document.getElementById('board-body').innerHTML = shown.map(s => {
       const p = s.p;
       const sharePct = s.share / totalShare * 100;
       // The notes open in a row directly beneath the ASIN that was clicked. The
@@ -1115,7 +1115,7 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
       // time you reach this table, and a change you cannot see reads as nothing
       // having happened — which is exactly how it was first reported.
       const noteRow = scope === p.asin
-        ? '<tr class="noterow"><td colspan="8"><div class="noterow-head"><span>' + noteTitle(p) +
+        ? '<tr class="noterow"><td colspan="9"><div class="noterow-head"><span>' + noteTitle(p) +
           '</span><span class="src">' + noteSource() + '</span></div>' + noteBody(p) + '</td></tr>'
         : '';
       return '<tr data-asin="' + p.asin + '"' + (scope === p.asin ? ' data-sel="1"' : '') + ' tabindex="0">' +
@@ -1566,8 +1566,7 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
       // Silence in the sheet is not guidance. Name the ASIN that has none rather
       // than leaving the previous one's notes up or showing an empty grid.
       return '<div class="none">No entry for <strong>' + esc(p.asin) +
-        '</strong> in the notes sheet — it lists 15 of the 17 ASINs. Treat this as unwritten, not as "no action".</div>' +
-        targetBlock(p);
+        '</strong> in the notes sheet — it lists 15 of the 17 ASINs. Treat this as unwritten, not as "no action".</div>';
     }
     const cells = [
       { lab: cols[0], v: n.direction, lead: true },
@@ -1577,7 +1576,7 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     return '<div class="notegrid">' + cells.map(c =>
       '<div class="notecol' + (c.lead ? ' lead' : '') + '"><div class="lab">' + esc(c.lab) + '</div>' +
       '<div class="body">' + (c.v ? esc(c.v) : '<span style="color:var(--ink-3)">—</span>') + '</div></div>'
-    ).join('') + '</div>' + targetBlock(p);
+    ).join('') + '</div>';
   }
   function noteTitle(p) {
     const n = p.note;
@@ -1585,39 +1584,6 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
       (n && n.line ? '<span class="line-tag">' + esc(n.line) + '</span>' : '');
   }
   const noteSource = () => esc([NOTEMETA.meeting, 'Campaign ASIN Notes'].filter(Boolean).join(' · '));
-
-  // The target lines for one ASIN, shown under its notes.
-  function targetBlock(p) {
-    const st = asinStatus(p);
-    const lens = lensPeriod();
-    if (st.kind === 'filling') {
-      return '<div class="tgt"><div class="tgt-lab">Target vs actual</div><div class="norank">' +
-        esc(lens ? lens.label : 'This period') + ' is still filling, so nothing is judged on it yet. ' +
-        'Pick a complete period at the top of the page.</div>' + complianceStrip(p) + '</div>';
-    }
-    if (st.kind === 'rank') {
-      return '<div class="tgt"><div class="tgt-lab">Target</div><div class="norank">' +
-        'The note asks for better ranking, which no figure on this page measures. ' +
-        'This ASIN has no Data Dive rank radar, so the instruction cannot be checked at all yet.</div></div>';
-    }
-    if (!st.results.length) {
-      return '<div class="tgt"><div class="tgt-lab">Target</div><div class="norank">' +
-        'No target set — the note gives a direction but no figure and no benchmark month.</div></div>';
-    }
-    const rows = st.results.map(r => {
-      const nums = r.op === 'between'
-        ? '<b>' + r.actualText + '</b> · target ' + r.targetText
-        : '<b>' + r.actualText + '</b> · target ' + (r.op === '>=' ? '≥ ' : '≤ ') + r.targetText;
-      return '<div class="tgt-row"><span class="verdict ' + (r.ok ? 'on">on target' : 'off">off target') + '</span>' +
-        '<span class="what">' + esc(r.label) + '</span>' +
-        '<span class="nums">' + nums + ' · ' + esc(r.periodRange || r.periodLabel) + '</span>' +
-        (r.scaled ? '<span class="assumed">pro-rated to this period</span>' : '') +
-        (r.stated ? '' : '<span class="assumed">' + esc(NOTEMETA.assumedBenchmarkNote || 'assumed benchmark') + '</span>') +
-        '</div>';
-    }).join('');
-    return '<div class="tgt"><div class="tgt-lab">Target vs actual · ' + esc(lens ? lens.range : '') + '</div>' +
-      rows + complianceStrip(p) + '</div>';
-  }
 
   function renderTargetBar() {
     const host = document.getElementById('targetbar');
@@ -1684,23 +1650,6 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     if (i !== undefined) { if (kind === 'week') lensWeek = i; else lensMonth = i; }
     if (!curPeriods()[lensIdx()]) { if (kind === 'week') lensWeek = Math.max(0, IW); else lensMonth = IM; }
     renderAll();
-  }
-
-  // Was this missed once, or every period? A single verdict cannot tell you.
-  function complianceStrip(p) {
-    const series = lensSeries();
-    const cells = series.map(L => {
-      const st = asinStatus(p, L);
-      const cls = st.kind === 'on' ? 'ok' : st.kind === 'off' ? 'bad' : 'na';
-      const sel = (L.kind === lensKind && L.i === lensIdx()) ? ' sel' : '';
-      return '<span class="cs-cell ' + cls + sel + '" title="' + esc(L.label) + ' — ' +
-        (st.kind === 'on' ? 'on target' : st.kind === 'off' ? 'off target: ' + st.missed.map(m => METRIC_LABEL[m.metric]).join(', ') : 'not judged') +
-        '"></span>';
-    }).join('');
-    if (!series.length) return '';
-    return '<div class="cstrip"><span class="cs-lab">' +
-      (lensKind === 'week' ? 'By week' : 'By month') + '</span><span class="cs-cells">' + cells + '</span>' +
-      '<span class="cs-ends">' + esc(series[0].label) + ' → ' + esc(series[series.length - 1].label) + '</span></div>';
   }
 
   function renderNote() {
@@ -2047,6 +1996,12 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     });
   });
 
+  document.querySelectorAll('#stock-seg button[data-stock]').forEach(b => {
+    // Only the board is filtered, so only the board is redrawn — the KPIs and the
+    // charts still describe the whole account, which is what they are for.
+    b.addEventListener('click', () => { stockFilter = b.dataset.stock; renderBoard(); });
+  });
+
   function renderAll() { renderTargetBar(); renderNote(); renderKpis(); renderMonth(); renderDay(); renderWeeks(); renderBoard(); renderEcon(); }
 
   /* ---- boot -------------------------------------------------------------- */
@@ -2062,12 +2017,6 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
   // leave the board captioned "Aug vs Jul" while it is showing Sep against Aug.
   document.querySelector('#board th[data-sort="share"]').textContent = MSHORT[5] + ' rev share';
   document.querySelector('#board th[data-sort="mom"]').textContent = MSHORT[5] + ' vs ' + MSHORT[4];
-  // "Direction" is the client's own column heading in the notes sheet, so this
-  // measured signal is called Trend — one word on the page, one meaning.
-  document.getElementById('board-note').innerHTML =
-    '<strong>Click any row to open that ASIN’s campaign notes underneath it.</strong> Trend compares the last 7 complete days against the 7 before them, always on units, so it means the same thing whichever measure is selected. Today is excluded from every trend because it is still filling. &ldquo;' +
-    MSHORT[5] + ' rev share&rdquo; is always share of ' + MLONG[5] + ' revenue.';
-
   renderAll();
 
   let t; addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => { renderMonth(); renderDay(); renderWeekStrip(); }, 120); });
