@@ -485,6 +485,20 @@ th.stockcol, td.stockcol { width: 104px; min-width: 104px; white-space: nowrap; 
   color: var(--warn-ink); background: var(--warn-bg); border-radius: var(--r); max-width: 96ch;
 }
 
+
+/* ---- Staleness banner ---------------------------------------------------- */
+/* A page that has stopped being fed looks exactly like a page that is up to
+   date. This says so, in the one place nobody scrolls past. */
+.stale {
+  margin-top: 12px; padding: 11px 14px; display: flex; align-items: baseline; gap: 10px;
+  flex-wrap: wrap; border-radius: var(--r); border: 1px solid var(--hairline);
+  border-left: 3px solid var(--warn); background: var(--warn-bg); color: var(--warn-ink);
+  font-size: 12.5px; line-height: 1.5;
+}
+.stale.bad { border-left-color: var(--crit); background: var(--crit-bg); color: var(--crit-ink); }
+.stale strong { font-weight: 600; }
+.stale .why { color: inherit; opacity: .85; }
+
 /* ---- P&L section --------------------------------------------------------- */
 .seg-sm button { padding: 6px 10px; font-size: 11.5px; }
 #econ-table { min-width: 900px; }
@@ -551,6 +565,8 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
       </div>
     </div>
   </header>
+
+  <div class="stale" id="stale" hidden></div>
 
   <div class="scopebar">
     <span class="eyebrow">Scope</span>
@@ -784,6 +800,29 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     return '<span class="chip ' + cls + '"><span class="gly" aria-hidden="true">' + gly + '</span>' + pct(v) + '</span>';
   }
 
+
+
+  /* ---- staleness --------------------------------------------------------- */
+  // Measured against the newest day in the data, not against pulledAt: a run
+  // that reaches Sellerboard and is handed nothing new is still a stale page.
+  function renderStale() {
+    const host = document.getElementById('stale');
+    const last = DAYS[LAST];
+    const today = new Date();
+    const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const lastUTC = new Date(last + 'T00:00:00Z').getTime();
+    const behind = Math.round((todayUTC - lastUTC) / 86400000);
+    // One day behind is the normal state: the day only closes after it ends.
+    if (behind < 2) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    host.className = 'stale' + (behind >= 3 ? ' bad' : '');
+    const pulled = DATA.pulledAt ? new Date(DATA.pulledAt) : null;
+    host.innerHTML =
+      '<strong>These numbers are ' + behind + ' days behind.</strong>' +
+      '<span class="why">The newest day here is ' + dayLabel(last) + ', and the last successful pull was ' +
+      (pulled ? pulled.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'unknown') +
+      '. Nothing newer has arrived since — treat every figure below as of that date, not today.</span>';
+  }
 
   /* ======================================================================= */
   /*  Focus panel — the pinned ASINs, read day-on-day and week-on-week       */
@@ -2521,7 +2560,7 @@ th.total-col, td.total-col { border-left: 1px solid var(--hairline); }
     btn._t = setTimeout(() => { btn.classList.remove('ok', 'bad'); label.textContent = was; }, 2200);
   });
 
-  function renderAll() { renderTargetBar(); renderNote(); renderFocus(); renderKpis(); renderMonth(); renderDay(); renderWeeks(); renderBoard(); renderEcon(); }
+  function renderAll() { renderStale(); renderTargetBar(); renderNote(); renderFocus(); renderKpis(); renderMonth(); renderDay(); renderWeeks(); renderBoard(); renderEcon(); }
 
   /* ---- boot -------------------------------------------------------------- */
   document.getElementById('window-label').textContent =
